@@ -30,7 +30,7 @@ Read more about Meteor on [Meteors GitHub project page](http://github.com/meteor
 
  13. `sudo apt-get install git`
  14. `cd ~ && git clone https://github.com/josteinaj/meteor-udoo.git`
- 15. `cd ~/meteor-udoo && ./scripts/generate-dev-bundle.sh without-dependencies`
+ 15. `cd ~/meteor-udoo && METEOR_NODE=/usr/bin/node METEOR_MONGO=/usr/bin/mongo ./scripts/generate-dev-bundle.sh`
  16. ``sudo ln --symbolic ~/meteor-udoo/meteor /usr/bin/meteor``
  17. Now you should be able to use the `meteor` command to your hearts content! Use `authbind --deep meteor --port 80` to bind to port 80
 

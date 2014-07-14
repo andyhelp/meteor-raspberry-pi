@@ -3,18 +3,6 @@
 set -e
 set -u
 
-WITHOUT_DEPENDENCIES=false
-for arg in "$@"
-do
-    if [ "$arg" = "without-dependencies" ]; then
-        WITHOUT_DEPENDENCIES=true
-        break
-    else
-        echo "invalid argument: $arg"
-        exit
-    fi
-done
-
 UNAME=$(uname)
 ARCH=$(uname -m)
 
@@ -83,25 +71,47 @@ umask 022
 mkdir build
 cd build
 
-if [ "$WITHOUT_DEPENDENCIES" != true ]; then
+if [ -n "${METEOR_NODE+1}" ]; then
+    if [ ! -e "$METEOR_NODE" ]; then
+        echo "File $METEOR_NODE not found"
+        exit 1
+    fi
+    METEOR_NPM=$(dirname ${METEOR_NODE})/npm
+    if [ ! -e "$METEOR_NPM" ]; then
+        echo "File $METEOR_NPM not found"
+        exit 1
+    fi
+    echo "External node: $METEOR_NODE"
+    echo "External npm: $METEOR_NPM"
+    mkdir -p "$DIR/bin"
 
-git clone https://github.com/joyent/node.git
-cd node
-# When upgrading node versions, also update the values of MIN_NODE_VERSION at
-# the top of tools/main.js and tools/server/boot.js, and the text in
-# docs/client/concepts.html and the README in tools/bundler.js.
-git checkout v0.10.29
+    echo "#!/usr/bin/env bash" > "$DIR/bin/node"
+    echo "$METEOR_NODE \"\$@\"" >> "$DIR/bin/node"
+    chmod +x "$DIR/bin/node"
 
-./configure --prefix="$DIR"
-make -j4
-make install PORTABLE=1
-# PORTABLE=1 is a node hack to make npm look relative to itself instead
-# of hard coding the PREFIX.
+    echo "#!/usr/bin/env bash" > "$DIR/bin/npm"
+    echo "$METEOR_NPM \"\$@\"" >> "$DIR/bin/npm"
+    chmod +x "$DIR/bin/npm"
+else
+    git clone https://github.com/joyent/node.git
+    cd node
+    # When upgrading node versions, also update the values of MIN_NODE_VERSION at
+    # the top of tools/main.js and tools/server/boot.js, and the text in
+    # docs/client/concepts.html and the README in tools/bundler.js.
+    git checkout v0.10.29
+
+    ./configure --prefix="$DIR"
+    make -j4
+    make install PORTABLE=1
+    # PORTABLE=1 is a node hack to make npm look relative to itself instead
+    # of hard coding the PREFIX.
+
+    stripBinary "$DIR/bin/node"
+fi
 
 # export path so we use our new node for later builds
 export PATH="$DIR/bin:$PATH"
 
-fi
 
 which node
 
@@ -154,96 +164,90 @@ rm -rf *
 mv ../$FIBERS_ARCH .
 cd ../..
 
-if [ "$WITHOUT_DEPENDENCIES" != true ]; then
-
-# Checkout and build mongodb.
-# We want to build a binary that includes SSL support but does not depend on a
-# particular version of openssl on the host system.
-
-cd "$DIR/build"
-OPENSSL="openssl-1.0.1g"
-OPENSSL_URL="http://www.openssl.org/source/$OPENSSL.tar.gz"
-wget $OPENSSL_URL || curl -O $OPENSSL_URL
-tar xzf $OPENSSL.tar.gz
-
-cd $OPENSSL
-if [ "$UNAME" == "Linux" ]; then
-    ./config --prefix="$DIR/build/openssl-out" no-shared
-else
-    # This configuration line is taken from Homebrew formula:
-    # https://github.com/mxcl/homebrew/blob/master/Library/Formula/openssl.rb
-    ./Configure no-shared zlib-dynamic --prefix="$DIR/build/openssl-out" darwin64-x86_64-cc enable-ec_nistp_64_gcc_128
-fi
-make install
-
-# To see the mongo changelog, go to http://www.mongodb.org/downloads,
-# click 'changelog' under the current version, then 'release notes' in
-# the upper right.
-cd "$DIR/build"
-MONGO_VERSION="2.4.9"
-
-# We use Meteor fork since we added some changes to the building script.
-# Our patches allow us to link most of the libraries statically.
-git clone git://github.com/meteor/mongo.git
-cd mongo
-git checkout ssl-r$MONGO_VERSION
-
-# Compile
-
-MONGO_FLAGS="--ssl --release -j4 "
-MONGO_FLAGS+="--cpppath=$DIR/build/openssl-out/include --libpath=$DIR/build/openssl-out/lib "
-
-if [ "$MONGO_OS" == "osx" ]; then
-    # NOTE: '--64' option breaks the compilation, even it is on by default on x64 mac: https://jira.mongodb.org/browse/SERVER-5575
-    MONGO_FLAGS+="--openssl=$DIR/build/openssl-out/lib "
-    /usr/local/bin/scons $MONGO_FLAGS mongo mongod
-elif [ "$MONGO_OS" == "linux" ]; then
-    MONGO_FLAGS+="--no-glibc-check --prefix=./ "
-    if [ "$ARCH" == "x86_64" ]; then
-      MONGO_FLAGS+="--64"
+if [ -n "${METEOR_MONGO+1}" ]; then
+    if [ ! -e "$METEOR_MONGO" ]; then
+        echo "File $METEOR_MONGO not found"
+        exit 1
     fi
-    scons $MONGO_FLAGS mongo mongod
+    METEOR_MONGOD="$(dirname ${METEOR_MONGO})/mongod"
+    if [ ! -e "$METEOR_MONGOD" ]; then
+        echo "File $METEOR_MONGOD not found"
+        exit 1
+    fi
+    echo "External mongo: $METEOR_MONGO"
+    echo "External mongod: $METEOR_MONGOD"
+    mkdir -p "$DIR/mongodb/bin"
+
+    echo "#!/usr/bin/env bash" > "$DIR/mongodb/bin/mongo"
+    echo "$METEOR_MONGO \"\$@\"" >> "$DIR/mongodb/bin/mongo"
+    chmod +x "$DIR/mongodb/bin/mongo"
+
+    echo "#!/usr/bin/env bash" > "$DIR/mongodb/bin/mongod"
+    echo "$METEOR_MONGOD \"\$@\"" >> "$DIR/mongodb/bin/mongod"
+    chmod +x "$DIR/mongodb/bin/mongod"
 else
-    echo "We don't know how to compile mongo for this platform"
-    exit 1
-fi
+    # Checkout and build mongodb.
+    # We want to build a binary that includes SSL support but does not depend on a
+    # particular version of openssl on the host system.
 
-# Copy binaries
-mkdir -p "$DIR/mongodb/bin"
-cp mongo "$DIR/mongodb/bin/"
-cp mongod "$DIR/mongodb/bin/"
+    cd "$DIR/build"
+    OPENSSL="openssl-1.0.1g"
+    OPENSSL_URL="http://www.openssl.org/source/$OPENSSL.tar.gz"
+    wget $OPENSSL_URL || curl -O $OPENSSL_URL
+    tar xzf $OPENSSL.tar.gz
 
-# Copy mongodb distribution information
-find ./distsrc -maxdepth 1 -type f -exec cp '{}' ../mongodb \;
+    cd $OPENSSL
+    if [ "$UNAME" == "Linux" ]; then
+        ./config --prefix="$DIR/build/openssl-out" no-shared
+    else
+        # This configuration line is taken from Homebrew formula:
+        # https://github.com/mxcl/homebrew/blob/master/Library/Formula/openssl.rb
+       ./Configure no-shared zlib-dynamic --prefix="$DIR/build/openssl-out" darwin64-x86_64-cc enable-ec_nistp_64_gcc_128
+    fi
+    make install
 
-cd "$DIR"
-stripBinary bin/node
-stripBinary mongodb/bin/mongo
-stripBinary mongodb/bin/mongod
+    # To see the mongo changelog, go to http://www.mongodb.org/downloads,
+    # click 'changelog' under the current version, then 'release notes' in
+    # the upper right.
+    cd "$DIR/build"
+    MONGO_VERSION="2.4.9"
 
-fi
+    # We use Meteor fork since we added some changes to the building script.
+    # Our patches allow us to link most of the libraries statically.
+    git clone git://github.com/meteor/mongo.git
+    cd mongo
+    git checkout ssl-r$MONGO_VERSION
 
-if [ "$WITHOUT_DEPENDENCIES" = true ]; then
+    # Compile
 
-mkdir -p "$DIR/mongodb/bin"
-mkdir -p "$DIR/bin"
+    MONGO_FLAGS="--ssl --release -j4 "
+    MONGO_FLAGS+="--cpppath=$DIR/build/openssl-out/include --libpath=$DIR/build/openssl-out/lib "
 
-echo "#!/usr/bin/env bash" > "$DIR/mongodb/bin/mongo"
-echo "mongo \"\$@\"" >> "$DIR/mongodb/bin/mongo"
-chmod +x "$DIR/mongodb/bin/mongo"
+    if [ "$MONGO_OS" == "osx" ]; then
+        # NOTE: '--64' option breaks the compilation, even it is on by default on x64 mac: https://jira.mongodb.org/browse/SERVER-5575
+        MONGO_FLAGS+="--openssl=$DIR/build/openssl-out/lib "
+        /usr/local/bin/scons $MONGO_FLAGS mongo mongod
+    elif [ "$MONGO_OS" == "linux" ]; then
+        MONGO_FLAGS+="--no-glibc-check --prefix=./ "
+        if [ "$ARCH" == "x86_64" ]; then
+          MONGO_FLAGS+="--64"
+        fi
+        scons $MONGO_FLAGS mongo mongod
+    else
+        echo "We don't know how to compile mongo for this platform"
+        exit 1
+    fi
 
-echo "#!/usr/bin/env bash" > "$DIR/mongodb/bin/mongod"
-echo "mongod \"\$@\"" >> "$DIR/mongodb/bin/mongod"
-chmod +x "$DIR/mongodb/bin/mongod"
+    # Copy binaries
+    mkdir -p "$DIR/mongodb/bin"
+    cp mongo "$DIR/mongodb/bin/"
+    cp mongod "$DIR/mongodb/bin/"
 
-echo "#!/usr/bin/env bash" > "$DIR/bin/node"
-echo "node \"\$@\"" >> "$DIR/bin/node"
-chmod +x "$DIR/bin/node"
+    # Copy mongodb distribution information
+    find ./distsrc -maxdepth 1 -type f -exec cp '{}' ../mongodb \;
 
-echo "#!/usr/bin/env bash" > "$DIR/bin/npm"
-echo "npm \"\$@\"" >> "$DIR/bin/npm"
-chmod +x "$DIR/bin/npm"
-
+    stripBinary "$DIR/mongodb/bin/mongo"
+    stripBinary "$DIR/mongodb/bin/mongod"
 fi
 
 echo BUNDLING
