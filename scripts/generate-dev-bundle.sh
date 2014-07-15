@@ -7,9 +7,9 @@ UNAME=$(uname)
 ARCH=$(uname -m)
 
 if [ "$UNAME" == "Linux" ] ; then
-    if [ "$ARCH" != "i686" -a "$ARCH" != "x86_64" -a "$ARCH" != "armv7l" ] ; then
+    if [ "$ARCH" != "i686" -a "$ARCH" != "x86_64" -a "$ARCH" != "armv6l" -a "$ARCH" != "armv7l" ] ; then
         echo "Unsupported architecture: $ARCH"
-        echo "Meteor only supports armv7l, i686 and x86_64 for now."
+        echo "Meteor only supports armv6l, armv7l, i686 and x86_64 for now."
         exit 1
     fi
 
